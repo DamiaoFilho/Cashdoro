@@ -129,63 +129,93 @@ Abstract SQLAlchemy base (`__abstract__ = True`): it has no table of its own. Ev
 | password_hash | str         | Never store or return the raw password |
 | is_active     | bool        | Default `true`; inactive users cannot authenticate (ban/disable). Not a soft delete: "Delete account" is a hard delete |
 
+### RefreshToken (`auth` context) — inherits BaseEntity
+
+Persisted so tokens can be revoked. Access tokens are short-lived JWTs and are not stored.
+
+| Field      | Type     | Notes                                          |
+|------------|----------|------------------------------------------------|
+| user_id    | UUID     | FK → User.id                                   |
+| token_hash | str      | Hash of the refresh token; never store it raw  |
+| expires_at | datetime | UTC                                            |
+| revoked_at | datetime | UTC, null while valid; set on logout/rotation  |
+
 ### Cashdoro (`cashdoro` context) — inherits BaseEntity
 
 Timer settings owned by a user. For now a user has exactly **one** cashdoro (1:1, created with defaults and edited afterwards). In the future a user may have several, each bound to a contact.
 
-| Field          | Type     | Notes                                      |
-|----------------|----------|--------------------------------------------|
-| user_id        | UUID     | FK → User.id, unique (1:1 for now)         |
-| session_time   | int      | Focus duration, in minutes                 |
-| pause_time     | int      | Break duration, in minutes                 |
-| hourly_rate    | Decimal  | Money earned per hour of focus             |
-| total_earnings | Decimal  | Sum of session earnings; never use float   |
+| Field                     | Type     | Notes                                      |
+|---------------------------|----------|--------------------------------------------|
+| user_id                   | UUID     | FK → User.id, unique (1:1 for now)         |
+| session_time              | int      | Focus duration, in minutes. Default `25`   |
+| pause_time                | int      | Short break duration, in minutes. Default `5` |
+| long_pause_time           | int      | Long break duration, in minutes. Default `15` |
+| sessions_until_long_break | int      | Focus phases before a long break. Default `4` |
+| hourly_rate               | Decimal  | Nullable, default `null`. Money earned per hour of focus; `null` = free sessions (plain pomodoro, no earnings) |
+| total_earnings            | Decimal  | Sum of session earnings, default `0`; never use float |
 
 Cashdoro holds **current settings only**; it is not history. Editing it never changes past sessions.
-`total_earnings` is a cached total: update it in the same transaction that completes a session so it never drifts from the sum of `Session.earnings`.
+`total_earnings` is a cached total: update it in the same transaction that ends a focus phase with earnings so it never drifts from the sum of `Session.earnings`.
 
 ### Session (`sessions` context) — inherits BaseEntity
 
-One row per pomodoro run. Session rows **are** the history. Settings are snapshotted at start so later cashdoro edits do not rewrite past earnings.
+One row per pomodoro run: a **focus** phase followed by a **break** phase (short or long). Session rows **are** the history. Settings are snapshotted at start so later cashdoro edits do not rewrite past earnings.
 
-| Field         | Type     | Notes                                          |
-|---------------|----------|------------------------------------------------|
-| cashdoro_id   | UUID     | FK → Cashdoro.id                               |
-| started_at    | datetime | UTC                                            |
-| ended_at      | datetime | UTC, null while running                        |
-| session_time  | int      | Snapshot of planned focus minutes at start     |
-| hourly_rate   | Decimal  | Snapshot of the cashdoro rate at start         |
-| focus_seconds | int      | Actual focused time (may be < planned)         |
-| earnings      | Decimal  | `focus_seconds / 3600 × hourly_rate`, set on end |
-| status        | enum     | `running` / `completed` / `abandoned`          |
+| Field          | Type     | Notes                                          |
+|----------------|----------|------------------------------------------------|
+| cashdoro_id    | UUID     | FK → Cashdoro.id                               |
+| phase          | enum     | `focus` / `short_break` / `long_break`; current phase while running, last phase reached once ended |
+| started_at     | datetime | UTC, start of the focus phase                  |
+| focus_ended_at | datetime | UTC, null while in focus; start of the break   |
+| ended_at       | datetime | UTC, null while running                        |
+| session_time   | int      | Snapshot of planned focus minutes at start     |
+| break_time     | int      | Planned break minutes; set when the break starts (`pause_time` or `long_pause_time`) |
+| hourly_rate    | Decimal  | Snapshot of the cashdoro rate at start; `null` = free session |
+| focus_seconds  | int      | Actual focused time (may be < planned); set when focus ends |
+| earnings       | Decimal  | Set when focus ends; see rules below           |
+| status         | enum     | `running` / `completed` / `abandoned` / `canceled` |
 
-Rules:
-- Earnings are calculated in the domain layer and stored when the session ends; they are never recalculated afterwards.
+Phase rules:
+- A session starts in `focus`. When focus ends (time elapsed or skipped), it moves to a break.
+- The break is `long_break` when this focus is the `sessions_until_long_break`-th focus counted since the last long break; otherwise `short_break`. Only sessions that reached a break count (`abandoned` in focus and `canceled` sessions do not).
+- When the break ends (time elapsed), the session becomes `completed`. The next session starts when the user starts it, except on skip (see Services).
+- Phase transitions on elapsed time are applied by the backend lazily on any read or write of the session (no background job), using the planned end time, not the request time.
+
+Earnings rules:
+- Earnings are calculated in the domain layer and stored when the focus phase ends; they are never recalculated afterwards.
+- Focus ended by elapsed time, skip, or abandon: `earnings = focus_seconds / 3600 × hourly_rate`, where `focus_seconds` is the time focused until that moment (capped at `session_time × 60`).
+- `canceled`: `earnings = 0`, nothing is added to `total_earnings`.
+- Free session (`hourly_rate` is `null`): `earnings` is `null`, nothing is added to `total_earnings`.
 - History = sessions of the user's cashdoro ordered by `started_at` desc.
 
-Relationships: `User 1 ── 1 Cashdoro` (will become `1 ── N`), `Cashdoro 1 ── N Session`.
+Relationships: `User 1 ── 1 Cashdoro` (will become `1 ── N`), `User 1 ── N RefreshToken`, `Cashdoro 1 ── N Session`.
 
 ## Services
 
 ### Backend (`apps/backend`)
 
-The backend is the source of truth for the session timer. The mobile app never sends durations.
+The backend is the source of truth for the session timer and its phases. The mobile app never sends durations.
 
 #### `auth`
-- **Register**
-- **Login**
-- **Logout**
+- **Register**: creates the user and its default cashdoro (25 min session, 5 min short break, 15 min long break every 4 sessions, no hourly rate) in the same transaction, calling `cashdoro.application`.
+- **Login**: rejects users with `is_active = false`. Returns a short-lived access token and a refresh token.
+- **Refresh token**: exchanges a valid refresh token for a new pair; the old refresh token is revoked (rotation).
+- **Logout**: revokes the refresh token. The access token expires on its own shortly after.
+- **Get me**: returns the authenticated user (never the password hash).
 - **Delete account**
 
 #### `cashdoro`
-- **Update cashdoro**
-- **View total earnings**
+- **Get cashdoro**: returns the user's cashdoro settings and `total_earnings`.
+- **Update cashdoro**: edits session, short/long break durations, sessions until long break, and `hourly_rate` (may be set to `null` to switch to free sessions).
 
 #### `sessions`
-- **Start session**: snapshots `session_time` and `hourly_rate` from the cashdoro, sets `started_at = now` (UTC) and status `running`. Only one `running` session per cashdoro at a time.
-- **Get running session**: returns the running session with `elapsed_seconds` and `remaining_seconds` computed by the backend from `started_at`.
-- **Complete session**: only allowed once `session_time` has elapsed. The backend sets `ended_at`, computes `focus_seconds = min(ended_at - started_at, session_time × 60)` and `earnings` in the domain layer, and adds them to `Cashdoro.total_earnings` in the same transaction.
-- **Abandon session**: ends a running session early. The backend sets `ended_at` and `focus_seconds` the same way. Whether partial focus time earns money is to be defined.
+- **Start session**: snapshots `session_time` and `hourly_rate` from the cashdoro, sets `started_at = now` (UTC), phase `focus`, status `running`. Only one `running` session per cashdoro at a time.
+- **Get running session**: returns the running session with its `phase`, `elapsed_seconds` and `remaining_seconds` for the current phase, computed by the backend.
+- **Skip phase**:
+  - In `focus`: ends focus now, computes `focus_seconds` and `earnings` until this moment, adds them to `Cashdoro.total_earnings` in the same transaction, and starts the break (short or long).
+  - In a break: ends the session as `completed` and immediately starts the next session in `focus`.
+- **Abandon session**: stops the cycle. In `focus`, ends focus now and keeps the partial `earnings` (added to `total_earnings`). In a break, earnings were already set. Status `abandoned`.
+- **Cancel session**: only in `focus`. Ends the session with `earnings = 0`; `total_earnings` is unchanged. Status `canceled`.
 - **List past sessions of a cashdoro**: ordered by `started_at` desc.
 - **See session earnings**
 
