@@ -17,6 +17,13 @@ earned progress and get notified when one timer is completed.
 - Failed tests block feature acceptance
 - Testing applies to all services: backend, frontend, and mobile (when implemented)
 
+### Backend test strategy
+
+- **API tests (`tests/api/`) are the main suite.** They hit endpoints through the FastAPI test client against a real Postgres, covering router → use case → repository → DB in one pass. Most features (CRUD, auth, transactions like keeping `total_earnings` in sync) are tested here.
+- **Unit tests (`tests/unit/`) are only for pure domain rules**, e.g. the earnings calculation (`Decimal` precision/rounding) and session status transitions. They are fast, need no fixtures, and must not mock repositories.
+- No separate integration folder. Add one only if a repository gains complex queries worth testing in isolation.
+- **Tests written before implementation must never be modified, under any circumstances.** They are the specification: the implementation must be changed to make them pass, never the other way around. This includes weakening assertions, skipping, deleting, or marking them as expected failures.
+
 ## Monorepo Strategy
 
 - Single repository for backend and mobile
@@ -76,9 +83,8 @@ project-s/
             sessions/
                domain/ application/ infrastructure/ api/
          tests/
-            unit/        # Domain + application, no DB (mirrors src/<context>/)
-            integration/ # Infrastructure against a real Postgres
-            api/         # HTTP-level tests via FastAPI test client
+            unit/        # Pure domain rules only, no DB, no mocks (mirrors src/<context>/domain/)
+            api/         # Main suite: HTTP via FastAPI test client against a real Postgres
       mobile/            # App frontend (Expo + React Native)
    packages/
       shared-types/      # Contracts and shared schemas / OpenAPI types
@@ -121,6 +127,7 @@ Abstract SQLAlchemy base (`__abstract__ = True`): it has no table of its own. Ev
 | email         | str         | Unique, validated                      |
 | username      | str         | Unique                                 |
 | password_hash | str         | Never store or return the raw password |
+| is_active     | bool        | Default `true`; inactive users cannot authenticate (ban/disable). Not a soft delete: "Delete account" is a hard delete |
 
 ### Cashdoro (`cashdoro` context) — inherits BaseEntity
 
@@ -168,9 +175,20 @@ Cashdoro
    - Update cashdoro
    - View total earnings
    - Notify
-Session:
-   - List past sessions create with a cashdoro
+Session
+   - Start session
+   - Complete session
+   - Abandon session
+   - Get running session
+   - List past sessions of a cashdoro
    - See session earnings
+
+Session timer rules:
+- The backend is the source of truth for the timer. The mobile app never sends durations; it only fetches the running session to sync the values shown on screen.
+- **Start session**: snapshots `session_time` and `hourly_rate` from the cashdoro, sets `started_at = now` (UTC) and status `running`. Only one `running` session per cashdoro at a time.
+- **Get running session**: returns the running session with `elapsed_seconds` and `remaining_seconds` computed by the backend from `started_at`.
+- **Complete session**: only allowed once `session_time` has elapsed. The backend sets `ended_at`, computes `focus_seconds = min(ended_at - started_at, session_time × 60)` and `earnings` in the domain layer, and adds them to `Cashdoro.total_earnings` in the same transaction.
+- **Abandon session**: ends a running session early. The backend sets `ended_at` and `focus_seconds` the same way. Whether partial focus time earns money is to be defined.
 
 ## 12 Common Hurdles with Commented Solutions
 To be defined.
