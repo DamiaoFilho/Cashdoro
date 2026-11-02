@@ -166,29 +166,33 @@ Rules:
 Relationships: `User 1 ── 1 Cashdoro` (will become `1 ── N`), `Cashdoro 1 ── N Session`.
 
 ## Services
-Authentication
-   - Login
-   - Logout
-   - Register
-   - Delete account
-Cashdoro
-   - Update cashdoro
-   - View total earnings
-   - Notify
-Session
-   - Start session
-   - Complete session
-   - Abandon session
-   - Get running session
-   - List past sessions of a cashdoro
-   - See session earnings
 
-Session timer rules:
-- The backend is the source of truth for the timer. The mobile app never sends durations; it only fetches the running session to sync the values shown on screen.
+### Backend (`apps/backend`)
+
+The backend is the source of truth for the session timer. The mobile app never sends durations.
+
+#### `auth`
+- **Register**
+- **Login**
+- **Logout**
+- **Delete account**
+
+#### `cashdoro`
+- **Update cashdoro**
+- **View total earnings**
+
+#### `sessions`
 - **Start session**: snapshots `session_time` and `hourly_rate` from the cashdoro, sets `started_at = now` (UTC) and status `running`. Only one `running` session per cashdoro at a time.
 - **Get running session**: returns the running session with `elapsed_seconds` and `remaining_seconds` computed by the backend from `started_at`.
 - **Complete session**: only allowed once `session_time` has elapsed. The backend sets `ended_at`, computes `focus_seconds = min(ended_at - started_at, session_time × 60)` and `earnings` in the domain layer, and adds them to `Cashdoro.total_earnings` in the same transaction.
 - **Abandon session**: ends a running session early. The backend sets `ended_at` and `focus_seconds` the same way. Whether partial focus time earns money is to be defined.
+- **List past sessions of a cashdoro**: ordered by `started_at` desc.
+- **See session earnings**
+
+### Mobile (`apps/mobile`)
+
+- **Timer screen**: fetches the running session from the backend to sync the values shown on screen; never computes or sends durations.
+- **Notify**: notifies the user when a timer is completed.
 
 ## 12 Common Hurdles with Commented Solutions
 To be defined.
