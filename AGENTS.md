@@ -19,7 +19,7 @@ and get notified when a timer is completed. Binding timers to tasks is a future 
 
 ### Backend test strategy
 
-- **API tests (`tests/api/`) are the main suite.** They hit endpoints through the FastAPI test client against a real Postgres, covering router → use case → repository → DB in one pass. Most features (CRUD, auth, transactions like keeping `total_earnings` in sync) are tested here.
+- **API tests (`tests/api/`) are the main suite.** They hit endpoints through the FastAPI `TestClient` (sync) against a real Postgres, covering router → use case → repository → DB in one pass. Most features (CRUD, auth, transactions like keeping `total_earnings` in sync) are tested here.
 - **Unit tests (`tests/unit/`) are only for pure domain rules**, e.g. the earnings calculation (`Decimal` precision/rounding) and session status transitions. They are fast, need no fixtures, and must not mock repositories.
 - No separate integration folder. Add one only if a repository gains complex queries worth testing in isolation.
 - **Tests written before implementation must never be modified, under any circumstances.** They are the specification: the implementation must be changed to make them pass, never the other way around. This includes weakening assertions, skipping, deleting, or marking them as expected failures.
@@ -38,9 +38,9 @@ and get notified when a timer is completed. Binding timers to tasks is a future 
    - Gamified mobile frontend for project (Expo, React Native, NativeWind)
    - Animations and sensory feedback libraries (Lottie, Reanimated, Confetti, Haptics)
 2. Backend API
-   - Python with **FastAPI** (async request handling, automatic OpenAPI/Swagger docs)
+   - Python with **FastAPI** (sync `def` endpoints, automatic OpenAPI/Swagger docs). No `async`/`await` in the backend: async adds complexity this app does not need
    - JWT tokens for user sessions (OAuth2 with Password Flow / JWT)
-   - PostgreSQL database with SQLAlchemy (ORM) + Alembic (migrations)
+   - PostgreSQL database with SQLAlchemy (ORM, sync `Session`, `psycopg` driver) + Alembic (migrations)
    - Pydantic v2 for data validation and DTO schemas
    - Domain-Driven Design (DDD) for business modules and boundaries
    
@@ -70,7 +70,7 @@ project-s/
             shared/      # Cross-context code (no business rules)
                config.py       # Settings (pydantic-settings, env vars)
                security.py     # JWT encode/decode, password hashing
-               database.py     # Async engine, session factory, BaseEntity
+               database.py     # Engine, session factory, BaseEntity
                dependencies.py # Common FastAPI deps (db session, current user)
             auth/        # Bounded context (same layout for every context)
                domain/          # Entities, value objects, repository protocols
@@ -106,6 +106,20 @@ Each bounded context lives in its own folder under `src/` and owns all of its la
 - `api` stays thin: parse request → call a use case → map the result to a response schema. No business logic, no direct DB access.
 - Contexts do not import each other's `infrastructure` or `api`. Cross-context calls go through the other context's `application` layer.
 - `shared/` contains technical plumbing only; no domain concepts.
+
+### Dependency injection (backend)
+
+Use FastAPI's `Depends`; no DI container library and no classic Singleton pattern (metaclass / `__new__`).
+
+- **One instance per process** (expensive, stateless, safe to share):
+  - `Settings`: `get_settings()` cached with `@lru_cache`.
+  - SQLAlchemy engine and `sessionmaker`: created once in the app `lifespan` (the engine owns the connection pool).
+  - External clients (e.g. `httpx.Client`): created in `lifespan`, closed on shutdown.
+- **One instance per request** (holds request/transaction state):
+  - `Session`: provided by `get_db()` with `yield`; never shared across requests.
+  - Repositories, use cases, and `current_user`: built per request from the session; they are cheap to create.
+- Wiring lives in `shared/dependencies.py` (common deps) and each context's `api` layer (repository → use case). `domain` and `application` receive dependencies through constructor/function arguments and never call `Depends` themselves.
+- Tests swap dependencies with `app.dependency_overrides`, never by patching modules.
 
 ## Models
 
@@ -233,8 +247,23 @@ All routes are served under the `/api/v1` prefix.
 ## 12 Common Hurdles with Commented Solutions
 To be defined.
 
-## 14 Design Patterns
-To be defined.
+## Design Patterns
+
+### In use
+
+- **Dependency Injection**: via FastAPI `Depends`; see "Dependency injection (backend)".
+- **Repository + Protocol**: `domain` declares the repository interface as a `typing.Protocol` (what it needs); `infrastructure` implements it with SQLAlchemy (how). Use cases depend only on the Protocol. Implementations do not inherit from it.
+- **Use case (Application Service)**: one class per user action in `application` (e.g. `StartSession`, `SkipPhase`) with an `execute` method. It orchestrates: load via repositories → call domain rules → save → commit → return a DTO. No business rules, no HTTP, no SQL.
+- **Data Mapper**: ORM models (`infrastructure`) are separate from domain entities; repositories convert between them (`to_entity` / `to_model`).
+
+### May be added (when needed)
+
+- **State machine** in `Session`: table of allowed phase/status transitions; actions raise `InvalidTransition` when not allowed.
+- **Value Objects**: `Money` (`Decimal`, 2 places, `ROUND_HALF_EVEN`) and `Duration` (avoids mixing minutes and seconds).
+- **Unit of Work**: `with uow:` wrapping atomic operations; commits leave the repositories.
+- **Injectable Clock**: `Clock.now()` injected into use cases so time-based rules are tested with a fixed clock.
+- **Domain exceptions + exception handler**: domain raises typed errors; the `api` layer maps them to HTTP status codes.
+- Later, only if justified: domain events (gamification), CQRS, Strategy for earnings.
 
 ## Weekly Pipeline
 To be defined.
