@@ -1,12 +1,12 @@
 # Architecture Overview
 
-This is a SaaS basic personal project. 
+This is a basic personal SaaS project.
 
 Code management will follow a monorepo strategy to keep all services versioned together, simplify integration, and standardize CI/CD.
 
-The product is focused in work time management with gamified elements.
-User can setup pomodoro timer settings and bind with tasks, view money
-earned progress and get notified when one timer is completed.
+The product is focused on work time management with gamified elements.
+Users can set up pomodoro timer settings, view their money earned progress,
+and get notified when a timer is completed. Binding timers to tasks is a future feature.
 
 ## Test-Driven Development (TDD)
 
@@ -15,7 +15,7 @@ earned progress and get notified when one timer is completed.
 - Maintain minimum test coverage threshold (target: >80%)
 - Tests are the primary specification and documentation for expected behavior
 - Failed tests block feature acceptance
-- Testing applies to all services: backend, frontend, and mobile (when implemented)
+- Testing applies to all services: backend and mobile
 
 ### Backend test strategy
 
@@ -42,7 +42,6 @@ earned progress and get notified when one timer is completed.
    - JWT tokens for user sessions (OAuth2 with Password Flow / JWT)
    - PostgreSQL database with SQLAlchemy (ORM) + Alembic (migrations)
    - Pydantic v2 for data validation and DTO schemas
-   - Local MinIO for object storage
    - Domain-Driven Design (DDD) for business modules and boundaries
    
 ## DDD Approach (Backend)
@@ -50,7 +49,7 @@ earned progress and get notified when one timer is completed.
 - Organize code by domain (not by technical layer only)
 - Each domain contains its own application, domain models, schemas, and infrastructure concerns
 - Keep business rules in domain services/entities and keep API routers thin
-- Use repositories/adapters for external systems (database, storage MinIO, third-party APIs)
+- Use repositories/adapters for external systems (database, third-party APIs)
 - Bounded contexts: `auth`, `cashdoro` (timer settings + earnings), `sessions`. Add new contexts (e.g. gamification) only when their business rules justify it
 - Start simple: apply DDD where business complexity exists; avoid overengineering
 
@@ -135,24 +134,26 @@ Persisted so tokens can be revoked. Access tokens are short-lived JWTs and are n
 
 | Field      | Type     | Notes                                          |
 |------------|----------|------------------------------------------------|
-| user_id    | UUID     | FK → User.id                                   |
+| user_id    | UUID     | FK → User.id, `ON DELETE CASCADE`              |
 | token_hash | str      | Hash of the refresh token; never store it raw  |
 | expires_at | datetime | UTC                                            |
 | revoked_at | datetime | UTC, null while valid; set on logout/rotation  |
 
 ### Cashdoro (`cashdoro` context) — inherits BaseEntity
 
-Timer settings owned by a user. For now a user has exactly **one** cashdoro (1:1, created with defaults and edited afterwards). In the future a user may have several, each bound to a contact.
+Timer settings owned by a user. For now a user has exactly **one** cashdoro (1:1, created with defaults and edited afterwards). Future feature: a user may have several, each bound to a contact.
 
 | Field                     | Type     | Notes                                      |
 |---------------------------|----------|--------------------------------------------|
-| user_id                   | UUID     | FK → User.id, unique (1:1 for now)         |
-| session_time              | int      | Focus duration, in minutes. Default `25`   |
-| pause_time                | int      | Short break duration, in minutes. Default `5` |
-| long_pause_time           | int      | Long break duration, in minutes. Default `15` |
-| sessions_until_long_break | int      | Focus phases before a long break. Default `4` |
-| hourly_rate               | Decimal  | Nullable, default `null`. Money earned per hour of focus; `null` = free sessions (plain pomodoro, no earnings) |
-| total_earnings            | Decimal  | Sum of session earnings, default `0`; never use float |
+| user_id                   | UUID     | FK → User.id, unique (1:1 for now), `ON DELETE CASCADE` |
+| session_time              | int      | Focus duration, in minutes. Default `25`. Range `1–180` |
+| pause_time                | int      | Short break duration, in minutes. Default `5`. Range `1–60` |
+| long_pause_time           | int      | Long break duration, in minutes. Default `15`. Range `1–120` |
+| sessions_until_long_break | int      | Focus phases before a long break. Default `4`. Range `1–12` |
+| hourly_rate               | Decimal  | `Numeric(12, 2)`, nullable, default `null`. Money earned per hour of focus; `null` = free sessions (plain pomodoro, no earnings). Range `0–100000.00` |
+| total_earnings            | Decimal  | `Numeric(12, 2)`, sum of session earnings, default `0`; never use float |
+
+Out-of-range values are rejected with a validation error (422).
 
 Cashdoro holds **current settings only**; it is not history. Editing it never changes past sessions.
 `total_earnings` is a cached total: update it in the same transaction that ends a focus phase with earnings so it never drifts from the sum of `Session.earnings`.
@@ -163,26 +164,27 @@ One row per pomodoro run: a **focus** phase followed by a **break** phase (short
 
 | Field          | Type     | Notes                                          |
 |----------------|----------|------------------------------------------------|
-| cashdoro_id    | UUID     | FK → Cashdoro.id                               |
+| cashdoro_id    | UUID     | FK → Cashdoro.id, `ON DELETE CASCADE`          |
 | phase          | enum     | `focus` / `short_break` / `long_break`; current phase while running, last phase reached once ended |
 | started_at     | datetime | UTC, start of the focus phase                  |
 | focus_ended_at | datetime | UTC, null while in focus; start of the break   |
 | ended_at       | datetime | UTC, null while running                        |
 | session_time   | int      | Snapshot of planned focus minutes at start     |
 | break_time     | int      | Planned break minutes; set when the break starts (`pause_time` or `long_pause_time`) |
-| hourly_rate    | Decimal  | Snapshot of the cashdoro rate at start; `null` = free session |
+| hourly_rate    | Decimal  | `Numeric(12, 2)`, snapshot of the cashdoro rate at start; `null` = free session |
 | focus_seconds  | int      | Actual focused time (may be < planned); set when focus ends |
-| earnings       | Decimal  | Set when focus ends; see rules below           |
+| earnings       | Decimal  | `Numeric(12, 2)`, set when focus ends; see rules below |
 | status         | enum     | `running` / `completed` / `abandoned` / `canceled` |
 
 Phase rules:
 - A session starts in `focus`. When focus ends (time elapsed or skipped), it moves to a break.
-- The break is `long_break` when this focus is the `sessions_until_long_break`-th focus counted since the last long break; otherwise `short_break`. Only sessions that reached a break count (`abandoned` in focus and `canceled` sessions do not).
+- The break is `long_break` when this focus is the `sessions_until_long_break`-th focus counted since the last long break; otherwise `short_break`. Only sessions that reached a break count (`abandoned` in focus and `canceled` sessions do not). The count resets to zero when more than 24 hours have passed since the `focus_ended_at` of the last counted session.
 - When the break ends (time elapsed), the session becomes `completed`. The next session starts when the user starts it, except on skip (see Services).
 - Phase transitions on elapsed time are applied by the backend lazily on any read or write of the session (no background job), using the planned end time, not the request time.
 
 Earnings rules:
 - Earnings are calculated in the domain layer and stored when the focus phase ends; they are never recalculated afterwards.
+- Rounding: all money values have 2 decimal places, rounded with `ROUND_HALF_EVEN` (banker's rounding) via `Decimal.quantize(Decimal("0.01"), rounding=ROUND_HALF_EVEN)`. Round each session's `earnings` once, then add the rounded value to `total_earnings`.
 - Focus ended by elapsed time, skip, or abandon: `earnings = focus_seconds / 3600 × hourly_rate`, where `focus_seconds` is the time focused until that moment (capped at `session_time × 60`).
 - `canceled`: `earnings = 0`, nothing is added to `total_earnings`.
 - Free session (`hourly_rate` is `null`): `earnings` is `null`, nothing is added to `total_earnings`.
@@ -196,13 +198,16 @@ Relationships: `User 1 ── 1 Cashdoro` (will become `1 ── N`), `User 1 �
 
 The backend is the source of truth for the session timer and its phases. The mobile app never sends durations.
 
+All routes are served under the `/api/v1` prefix.
+
 #### `auth`
 - **Register**: creates the user and its default cashdoro (25 min session, 5 min short break, 15 min long break every 4 sessions, no hourly rate) in the same transaction, calling `cashdoro.application`.
-- **Login**: rejects users with `is_active = false`. Returns a short-lived access token and a refresh token.
+- **Login**: rejects users with `is_active = false`. Returns a short-lived access token (default 15 minutes) and a refresh token (default 7 days). Both lifetimes are configurable via settings.
 - **Refresh token**: exchanges a valid refresh token for a new pair; the old refresh token is revoked (rotation).
 - **Logout**: revokes the refresh token. The access token expires on its own shortly after.
+- **Current user (dependency)**: `get_current_user` validates the access token, then loads the user by `sub`; returns 401 if the user no longer exists or has `is_active = false`. This cuts off banned/deleted users without storing access tokens.
 - **Get me**: returns the authenticated user (never the password hash).
-- **Delete account**
+- **Delete account**: hard delete of the user; its cashdoro, sessions, and refresh tokens are removed by `ON DELETE CASCADE`.
 
 #### `cashdoro`
 - **Get cashdoro**: returns the user's cashdoro settings and `total_earnings`.
@@ -217,7 +222,6 @@ The backend is the source of truth for the session timer and its phases. The mob
 - **Abandon session**: stops the cycle. In `focus`, ends focus now and keeps the partial `earnings` (added to `total_earnings`). In a break, earnings were already set. Status `abandoned`.
 - **Cancel session**: only in `focus`. Ends the session with `earnings = 0`; `total_earnings` is unchanged. Status `canceled`.
 - **List past sessions of a cashdoro**: ordered by `started_at` desc.
-- **See session earnings**
 
 ### Mobile (`apps/mobile`)
 
