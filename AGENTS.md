@@ -125,7 +125,7 @@ Abstract SQLAlchemy base (`__abstract__ = True`): it has no table of its own. Ev
 |---------------|-------------|----------------------------------------|
 | email         | str         | Unique, validated                      |
 | username      | str         | Unique                                 |
-| password_hash | str         | Never store or return the raw password |
+| password_hash | str         | bcrypt hash (`bcrypt` lib, cost factor 12). Never store or return the raw password. bcrypt only uses the first 72 bytes, so reject passwords longer than 72 bytes (UTF-8) with a 422 |
 | is_active     | bool        | Default `true`; inactive users cannot authenticate (ban/disable). Not a soft delete: "Delete account" is a hard delete |
 
 ### RefreshToken (`auth` context) — inherits BaseEntity
@@ -181,6 +181,8 @@ Phase rules:
 - The break is `long_break` when this focus is the `sessions_until_long_break`-th focus counted since the last long break; otherwise `short_break`. Only sessions that reached a break count (`abandoned` in focus and `canceled` sessions do not). The count resets to zero when more than 24 hours have passed since the `focus_ended_at` of the last counted session.
 - When the break ends (time elapsed), the session becomes `completed`. The next session starts when the user starts it, except on skip (see Services).
 - Phase transitions on elapsed time are applied by the backend lazily on any read or write of the session (no background job), using the planned end time, not the request time.
+- Lazy transitions live in a single domain method (e.g. `Session.advance(now)`); no other code changes `phase`/`status` based on elapsed time.
+- A session is started from **one place only**: the `StartSession` use case. It first loads the cashdoro's `running` session and calls `advance(now)` on it, and only then checks the "one running session" rule. Every path that starts a session (Start session, skip in a break) goes through it; no other code creates `Session` rows.
 
 Earnings rules:
 - Earnings are calculated in the domain layer and stored when the focus phase ends; they are never recalculated afterwards.
@@ -218,7 +220,7 @@ All routes are served under the `/api/v1` prefix.
 - **Get running session**: returns the running session with its `phase`, `elapsed_seconds` and `remaining_seconds` for the current phase, computed by the backend.
 - **Skip phase**:
   - In `focus`: ends focus now, computes `focus_seconds` and `earnings` until this moment, adds them to `Cashdoro.total_earnings` in the same transaction, and starts the break (short or long).
-  - In a break: ends the session as `completed` and immediately starts the next session in `focus`.
+  - In a break: ends the session as `completed` and immediately starts the next session in `focus` by calling the `StartSession` use case.
 - **Abandon session**: stops the cycle. In `focus`, ends focus now and keeps the partial `earnings` (added to `total_earnings`). In a break, earnings were already set. Status `abandoned`.
 - **Cancel session**: only in `focus`. Ends the session with `earnings = 0`; `total_earnings` is unchanged. Status `canceled`.
 - **List past sessions of a cashdoro**: ordered by `started_at` desc.
