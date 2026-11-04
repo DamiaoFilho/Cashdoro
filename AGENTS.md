@@ -249,6 +249,8 @@ To be defined.
 
 ## Design Patterns
 
+New design patterns are added **only when explicitly requested**, to avoid overengineering. This includes factories, wrappers, and other abstractions not listed under "In use". Prefer calling a library directly until a request says otherwise.
+
 ### In use
 
 - **Dependency Injection**: via FastAPI `Depends`; see "Dependency injection (backend)".
@@ -256,7 +258,7 @@ To be defined.
 - **Use case (Application Service)**: one class per user action in `application` (e.g. `StartSession`, `SkipPhase`) with an `execute` method. It orchestrates: load via repositories → call domain rules → save → commit → return a DTO. No business rules, no HTTP, no SQL.
 - **Data Mapper**: ORM models (`infrastructure`) are separate from domain entities; repositories convert between them (`to_entity` / `to_model`).
 
-### May be added (when needed)
+### May be added (only when explicitly requested)
 
 - **State machine** in `Session`: table of allowed phase/status transitions; actions raise `InvalidTransition` when not allowed.
 - **Value Objects**: `Money` (`Decimal`, 2 places, `ROUND_HALF_EVEN`) and `Duration` (avoids mixing minutes and seconds).
