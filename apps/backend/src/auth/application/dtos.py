@@ -5,6 +5,12 @@ from src.auth.domain.user import User
 
 
 @dataclass(frozen=True)
+class TokenPairDTO:
+    access_token: str
+    refresh_token: str
+
+
+@dataclass(frozen=True)
 class UserDTO:
     id: UUID
     email: str

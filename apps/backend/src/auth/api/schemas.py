@@ -1,10 +1,28 @@
 from typing import Annotated
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, EmailStr, Field, StringConstraints, field_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    EmailStr,
+    Field,
+    StringConstraints,
+    field_validator,
+    validate_email,
+)
+from pydantic_core import PydanticCustomError
 
-BCRYPT_MAX_PASSWORD_BYTES = 72
+from src.shared.security import BCRYPT_MAX_PASSWORD_BYTES
+
 USERNAME_MAX_LENGTH = 50
+
+
+def normalize_email(email: str) -> str:
+    """Applies the normalization EmailStr does on register. Malformed values are kept as is."""
+    try:
+        return validate_email(email)[1]
+    except PydanticCustomError:
+        return email
 
 
 class RegisterRequest(BaseModel):
@@ -30,3 +48,11 @@ class UserResponse(BaseModel):
     username: str
     is_active: bool
     is_verified: bool
+
+
+class TokenResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    access_token: str
+    refresh_token: str
+    token_type: str = "bearer"

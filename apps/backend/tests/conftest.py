@@ -17,6 +17,7 @@ ALEMBIC_INI = Path(__file__).parents[1] / "alembic.ini"
 # Tests must never touch the development database. The app lifespan and Alembic read the database
 # name from get_settings(), which is first called inside the fixtures below.
 os.environ["DB_NAME"] = TEST_DB_NAME
+os.environ["JWT_SECRET"] = "test-only-secret-with-at-least-32-bytes"
 
 
 @pytest.fixture(scope="session")

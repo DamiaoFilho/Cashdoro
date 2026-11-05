@@ -6,12 +6,14 @@ from fastapi import APIRouter, Depends, FastAPI
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import Session, sessionmaker
 
-from src.auth.api.router import router as auth_router
+from src.auth.api.auth_router import router as auth_router
+from src.auth.api.users_router import router as users_router
 from src.shared.config import get_settings
 from src.shared.dependencies import get_db
 
 api_router = APIRouter(prefix="/api/v1")
 api_router.include_router(auth_router)
+api_router.include_router(users_router)
 
 
 @api_router.get("/health")

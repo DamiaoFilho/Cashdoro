@@ -85,6 +85,8 @@ project-s/
          tests/
             unit/        # Pure domain rules only, no DB, no mocks (mirrors src/<context>/domain/)
             api/         # Main suite: HTTP via FastAPI test client against a real Postgres
+               auth/           # One test file per service: test_register.py, test_login.py, ...
+               users/          # test_me.py
       mobile/            # App frontend (Expo + React Native)
    packages/
       shared-types/      # Contracts and shared schemas / OpenAPI types
