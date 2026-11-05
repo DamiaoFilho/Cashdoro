@@ -10,3 +10,9 @@ class RefreshToken:
     expires_at: datetime
     revoked_at: datetime | None = None
     id: UUID | None = None
+
+    def is_valid(self, now: datetime) -> bool:
+        return self.revoked_at is None and now < self.expires_at
+
+    def revoke(self, now: datetime) -> None:
+        self.revoked_at = now

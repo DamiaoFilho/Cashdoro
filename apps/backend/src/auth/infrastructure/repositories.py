@@ -39,6 +39,16 @@ def refresh_token_to_model(token: RefreshToken) -> RefreshTokenModel:
     )
 
 
+def refresh_token_to_entity(model: RefreshTokenModel) -> RefreshToken:
+    return RefreshToken(
+        id=model.id,
+        user_id=model.user_id,
+        token_hash=model.token_hash,
+        expires_at=model.expires_at,
+        revoked_at=model.revoked_at,
+    )
+
+
 class SqlAlchemyUserRepository:
     def __init__(self, session: Session) -> None:
         self._session = session
@@ -71,6 +81,17 @@ class SqlAlchemyRefreshTokenRepository:
 
     def add(self, token: RefreshToken) -> None:
         self._session.add(refresh_token_to_model(token))
+
+    def get_by_hash_for_update(self, token_hash: str) -> RefreshToken | None:
+        model = self._session.scalar(
+            select(RefreshTokenModel)
+            .where(RefreshTokenModel.token_hash == token_hash)
+            .with_for_update()
+        )
+        return refresh_token_to_entity(model) if model else None
+
+    def save_revocation(self, token: RefreshToken) -> None:
+        self._session.get_one(RefreshTokenModel, token.id).revoked_at = token.revoked_at
 
     def commit(self) -> None:
         self._session.commit()

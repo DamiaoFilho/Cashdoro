@@ -40,6 +40,10 @@ class RegisterRequest(BaseModel):
         return password
 
 
+class RefreshRequest(BaseModel):
+    refresh_token: str = Field(min_length=1)
+
+
 class UserResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 

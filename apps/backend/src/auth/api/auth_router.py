@@ -4,8 +4,15 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
 
-from src.auth.api.schemas import RegisterRequest, TokenResponse, UserResponse, normalize_email
+from src.auth.api.schemas import (
+    RefreshRequest,
+    RegisterRequest,
+    TokenResponse,
+    UserResponse,
+    normalize_email,
+)
 from src.auth.application.login_user import LoginUser
+from src.auth.application.refresh_tokens import RefreshTokens
 from src.auth.application.register_user import RegisterUser
 from src.auth.infrastructure.repositories import (
     SqlAlchemyRefreshTokenRepository,
@@ -26,6 +33,15 @@ def get_login_user(
     settings: Annotated[Settings, Depends(get_settings)],
 ) -> LoginUser:
     return LoginUser(SqlAlchemyUserRepository(db), SqlAlchemyRefreshTokenRepository(db), settings)
+
+
+def get_refresh_tokens(
+    db: Annotated[Session, Depends(get_db)],
+    settings: Annotated[Settings, Depends(get_settings)],
+) -> RefreshTokens:
+    return RefreshTokens(
+        SqlAlchemyUserRepository(db), SqlAlchemyRefreshTokenRepository(db), settings
+    )
 
 
 @router.post("/register", status_code=status.HTTP_201_CREATED)
@@ -50,6 +66,21 @@ def login(
         raise HTTPException(
             status.HTTP_401_UNAUTHORIZED,
             "Invalid credentials",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    return TokenResponse.model_validate(tokens)
+
+
+@router.post("/refresh")
+def refresh(
+    request: RefreshRequest,
+    use_case: Annotated[RefreshTokens, Depends(get_refresh_tokens)],
+) -> TokenResponse:
+    tokens = use_case.execute(request.refresh_token)
+    if tokens is None:
+        raise HTTPException(
+            status.HTTP_401_UNAUTHORIZED,
+            "Invalid refresh token",
             headers={"WWW-Authenticate": "Bearer"},
         )
     return TokenResponse.model_validate(tokens)
