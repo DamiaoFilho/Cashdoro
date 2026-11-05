@@ -13,6 +13,10 @@ class Settings(BaseSettings):
     db_host: str = "localhost"
     db_port: int = 5432
 
+    jwt_secret: str
+    access_token_expire_minutes: int = 15
+    refresh_token_expire_days: int = 7
+
     @property
     def database_url(self) -> str:
         return URL.create(

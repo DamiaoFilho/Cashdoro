@@ -5,9 +5,13 @@ description = "Backend API for project-s"
 requires-python = ">=3.14"
 dependencies = [
     "alembic>=1.20.1",
+    "bcrypt>=5.0.0",
+    "email-validator>=2.3.0",
     "fastapi>=0.162.0",
     "psycopg[binary]>=3.3.8",
     "pydantic-settings>=2.16.2",
+    "pyjwt>=2.15.1",
+    "python-multipart>=0.0.33",
     "sqlalchemy>=2.1.8",
     "uvicorn[standard]>=0.54.0",
 ]
@@ -15,6 +19,8 @@ dependencies = [
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]
+# Allows test files with the same name in different context folders.
+addopts = "--import-mode=importlib"
 
 [tool.coverage.run]
 source = ["src"]
