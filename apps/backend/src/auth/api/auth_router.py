@@ -12,6 +12,7 @@ from src.auth.api.schemas import (
     normalize_email,
 )
 from src.auth.application.login_user import LoginUser
+from src.auth.application.logout_user import LogoutUser
 from src.auth.application.refresh_tokens import RefreshTokens
 from src.auth.application.register_user import RegisterUser
 from src.auth.infrastructure.repositories import (
@@ -42,6 +43,10 @@ def get_refresh_tokens(
     return RefreshTokens(
         SqlAlchemyUserRepository(db), SqlAlchemyRefreshTokenRepository(db), settings
     )
+
+
+def get_logout_user(db: Annotated[Session, Depends(get_db)]) -> LogoutUser:
+    return LogoutUser(SqlAlchemyRefreshTokenRepository(db))
 
 
 @router.post("/register", status_code=status.HTTP_201_CREATED)
@@ -84,3 +89,11 @@ def refresh(
             headers={"WWW-Authenticate": "Bearer"},
         )
     return TokenResponse.model_validate(tokens)
+
+
+@router.post("/logout", status_code=status.HTTP_204_NO_CONTENT)
+def logout(
+    request: RefreshRequest,
+    use_case: Annotated[LogoutUser, Depends(get_logout_user)],
+) -> None:
+    use_case.execute(request.refresh_token)
