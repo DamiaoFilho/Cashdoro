@@ -16,6 +16,7 @@ and get notified when a timer is completed. Binding timers to tasks is a future 
 - Tests are the primary specification and documentation for expected behavior
 - Failed tests block feature acceptance
 - Testing applies to all services: backend and mobile
+- Tests cover happy paths only. Add tests for error or edge cases only when explicitly requested.
 
 ### Backend test strategy
 
@@ -137,10 +138,11 @@ Abstract SQLAlchemy base (`__abstract__ = True`): it has no table of its own. Ev
 
 | Field         | Type        | Notes                                  |
 |---------------|-------------|----------------------------------------|
-| email         | str         | Unique, validated                      |
-| username      | str         | Unique                                 |
+| email         | str         | Unique, must have a valid email format (422 otherwise) |
+| username      | str         | Unique. Surrounding whitespace is stripped, then it must have 1–50 characters (422 otherwise) |
 | password_hash | str         | bcrypt hash (`bcrypt` lib, cost factor 12). Never store or return the raw password. bcrypt only uses the first 72 bytes, so reject passwords longer than 72 bytes (UTF-8) with a 422 |
 | is_active     | bool        | Default `true`; inactive users cannot authenticate (ban/disable). Not a soft delete: "Delete account" is a hard delete |
+| is_verified   | bool        | Default `false`; whether the user has verified their email |
 
 ### RefreshToken (`auth` context) — inherits BaseEntity
 
