@@ -14,6 +14,10 @@ class UserRepository(Protocol):
 
     def get_by_id(self, user_id: UUID) -> User | None: ...
 
+    def delete(self, user_id: UUID) -> None:
+        """Hard delete. Data owned by the user is removed by ON DELETE CASCADE."""
+        ...
+
     def commit(self) -> None: ...
 
 

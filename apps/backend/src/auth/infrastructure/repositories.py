@@ -1,6 +1,6 @@
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -70,6 +70,9 @@ class SqlAlchemyUserRepository:
     def get_by_id(self, user_id: UUID) -> User | None:
         model = self._session.get(UserModel, user_id)
         return to_entity(model) if model else None
+
+    def delete(self, user_id: UUID) -> None:
+        self._session.execute(delete(UserModel).where(UserModel.id == user_id))
 
     def commit(self) -> None:
         self._session.commit()
