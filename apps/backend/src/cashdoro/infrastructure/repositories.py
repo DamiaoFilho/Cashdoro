@@ -42,3 +42,14 @@ class SqlAlchemyCashdoroRepository:
     def get_by_user_id(self, user_id: UUID) -> Cashdoro | None:
         model = self._session.scalar(select(CashdoroModel).where(CashdoroModel.user_id == user_id))
         return to_entity(model) if model else None
+
+    def save_settings(self, cashdoro: Cashdoro) -> None:
+        model = self._session.get_one(CashdoroModel, cashdoro.id)
+        model.session_time = cashdoro.session_time
+        model.pause_time = cashdoro.pause_time
+        model.long_pause_time = cashdoro.long_pause_time
+        model.sessions_until_long_break = cashdoro.sessions_until_long_break
+        model.hourly_rate = cashdoro.hourly_rate
+
+    def commit(self) -> None:
+        self._session.commit()
