@@ -11,7 +11,7 @@ from sqlalchemy import Engine, create_engine, make_url, text
 from src.main import create_app
 from src.shared.config import get_settings
 
-TEST_DB_NAME = "project_s_test"
+TEST_DB_NAME = "cashdoro_test"
 ALEMBIC_INI = Path(__file__).parents[1] / "alembic.ini"
 
 # Tests must never touch the development database. The app lifespan and Alembic read the database
