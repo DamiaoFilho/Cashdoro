@@ -19,14 +19,18 @@ from src.auth.infrastructure.repositories import (
     SqlAlchemyRefreshTokenRepository,
     SqlAlchemyUserRepository,
 )
+from src.cashdoro.application.create_default_cashdoro import CreateDefaultCashdoro
 from src.shared.config import Settings, get_settings
-from src.shared.dependencies import get_db
+from src.shared.dependencies import get_create_default_cashdoro, get_db
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
 
-def get_register_user(db: Annotated[Session, Depends(get_db)]) -> RegisterUser:
-    return RegisterUser(SqlAlchemyUserRepository(db))
+def get_register_user(
+    db: Annotated[Session, Depends(get_db)],
+    create_default_cashdoro: Annotated[CreateDefaultCashdoro, Depends(get_create_default_cashdoro)],
+) -> RegisterUser:
+    return RegisterUser(SqlAlchemyUserRepository(db), create_default_cashdoro)
 
 
 def get_login_user(

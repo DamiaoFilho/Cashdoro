@@ -4,6 +4,7 @@ from alembic import context
 from sqlalchemy import create_engine, pool
 
 from src.auth.infrastructure import models as auth_models  # noqa: F401 (registers the tables)
+from src.cashdoro.infrastructure import models as cashdoro_models  # noqa: F401
 from src.shared.config import get_settings
 from src.shared.database import BaseEntity
 
