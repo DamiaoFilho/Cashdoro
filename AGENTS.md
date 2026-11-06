@@ -61,7 +61,7 @@ To be defined.
 ## Directory Structure
 
 ```text
-project-s/
+cashdoro/
    apps/
       backend/           # FastAPI
          alembic/        # Migrations

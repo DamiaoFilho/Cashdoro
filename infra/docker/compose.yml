@@ -1,18 +1,18 @@
-name: project-s
+name: cashdoro
 
 services:
   postgres:
     image: postgres:18-alpine
     environment:
-      POSTGRES_USER: project_s
-      POSTGRES_PASSWORD: project_s
-      POSTGRES_DB: project_s
+      POSTGRES_USER: cashdoro
+      POSTGRES_PASSWORD: cashdoro
+      POSTGRES_DB: cashdoro
     ports:
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U project_s -d project_s"]
+      test: ["CMD-SHELL", "pg_isready -U cashdoro -d cashdoro"]
       interval: 5s
       timeout: 3s
       retries: 10
